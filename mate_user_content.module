@@ -1,0 +1,318 @@
+<?php
+/**
+ * @file
+ * Mate User Content Module - Audits of Users Production.
+ */
+
+/**
+ * Implements hook_menu().
+ */
+function mate_user_content_menu() {
+  $items['admin/content/users'] = array(
+    'title' => 'Users content',
+    'page callback' => 'mate_user_content_list',
+    'access callback' => 'user_access',
+    'access arguments' => TRUE,
+    'access arguments' => array('access administration menu'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  $items['admin/user/%user/content'] = array(
+    'title' => 'Content',
+    'page callback' => 'mate_user_content_detail',
+    'page arguments' => array(2),
+    'access callback' => 'user_access',
+    'access arguments' => TRUE,
+    'access arguments' => array('access administration menu'),
+  );
+
+  return $items;
+}
+
+/**
+ * Returns default time in unix time (today).
+ * @return int
+ */
+function mate_user_content_default_from() {
+  return strtotime('today');
+}
+
+/**
+ * Returns default time in unix time (today's last second of last minute of last hour).
+ * @return int
+ */
+function mate_user_content_default_until() {
+  return strtotime('today') + 86400 - 1;
+}
+
+/**
+ * Content by user page callback.
+ * @return string
+ */
+function mate_user_content_list() {
+  $from = mate_user_content_default_from();
+  if (!empty($_GET['from']['date'])) {
+    $from = mate_user_content_get_unixtime_from_date($_GET['from']['date'] . ' 00:00:00');
+  }
+
+  $until = mate_user_content_default_until();
+  if (!empty($_GET['until']['date'])) {
+    $until = mate_user_content_get_unixtime_from_date($_GET['until']['date'] . ' 23:59:59');
+  }
+
+  $roles = array_keys(mate_user_content_allowed_roles());
+  if (!empty($_GET['roles'])) {
+    $roles = $_GET['roles'];
+  }
+
+  $users = mate_user_get_users_production($from, $until, $roles);
+
+  foreach ($users as $key => $user) {
+      $content = mate_user_get_user_content($from, $until, $user->uid);
+      $line = '';
+
+      foreach ($content as $c) {
+          $line .= l(t($c->title), "node/$c->nid", array('attributes' => array('title' => $c->title, 'target'=> '_blank'))) . '</br >';
+      }
+
+      if (count($content) == 40) {
+          $line .= l('Ver mas',
+            'admin/user/' . $user->uid . '/content',
+              array(
+                  'attributes' => array('title' => $user->name),
+                  'query' => array(
+                      'from' => date('Y-m-d', $from),
+                      'until' => date('Y-m-d', $until),
+                  )
+              )
+          );
+      }
+
+      $users[$key]->content = $line;
+  }
+
+  return theme('mate_user_content_list', array(
+    'users' => $users,
+    'from' => $from,
+    'until' => $until,
+  ));
+}
+
+/**
+ * User's content list page callback.
+ *
+ * @param $user
+ * @return string
+ */
+function mate_user_content_detail($user) {
+
+  $from = mate_user_content_default_from();
+  if (!empty($_GET['from'])) {
+    $from = $_GET['from'];
+  }
+
+  $until = mate_user_content_default_until();
+  if (!empty($_GET['until'])) {
+    $until = $_GET['until'];
+  }
+
+  $user_content = mate_user_get_user_content(strtotime($from['date']), strtotime($until['date']), $user->uid);
+  return theme('mate_user_content_detail', array(
+    'nodes' => $user_content,
+    'from' => $from,
+    'until' => $until,
+    'username' => $user->name,
+  ));
+}
+
+/**
+ * Gets the content produced by an user from until date.
+ *
+ * @param $from
+ * @param $until
+ * @param $uid
+ *
+ * @return mixed
+ */
+function mate_user_get_user_content($from, $until, $uid) {
+    $query = db_select('node', 'n')->extend('PagerDefault')->limit(40);
+    $query
+      ->fields('n', array('nid', 'type', 'title', 'status', 'created', 'changed'))
+      ->where('uid = :uid AND created BETWEEN :from AND :until', array(
+              ':uid' => $uid,
+              ':from' => $from,
+              ':until' => $until,
+          ))
+      ->orderBy('created', 'DESC');
+    return $query->execute()->fetchAll();
+}
+
+/**
+ * Gets all users and his production in a date range.
+ *
+ * @param $from
+ * @param $until
+ * @param $roles
+ *
+ * @return Array
+ */
+function mate_user_get_users_production($from, $until, $roles) {
+    $content_sql = 'SELECT u.uid, u.name, count(n.nid) nodes
+                    FROM {node} n
+                        INNER JOIN {users} u ON n.uid = u.uid
+                        INNER JOIN {users_roles} ur ON u.uid = ur.uid
+                    WHERE ur.rid IN (:roles) AND n.created BETWEEN :from AND :until
+                    GROUP BY u.uid, u.name
+                    ORDER BY u.name';
+
+    $users = db_query($content_sql, array(
+      ':roles' => $roles, 
+      ':from' => $from, 
+      ':until' => $until,
+    ));
+    $users_data = $users->fetchAllAssoc('name');
+    return $users_data;
+}
+
+/**
+ * Implements hook_theme()
+ *
+ * @param $existing
+ * @param $type
+ * @param $theme
+ * @param $path
+ * @return array
+ */
+function mate_user_content_theme($existing, $type, $theme, $path) {
+  $base = array(
+    'path' => drupal_get_path('module', 'mate_user_content'),
+  );
+
+  return array(
+    'mate_user_content_list' => $base + array(
+        'template' => 'mate_user_content_list',
+      ),
+    'mate_user_content_detail' => $base + array(
+        'template' => 'mate_user_content_detail',
+      ),
+  );
+}
+
+/**
+ * Form to select a period of time.
+ * @param $form
+ * @param $form_state
+ * @return mixed
+ *
+ */
+function mate_user_content_from_until_form($form, &$form_state) {
+  $default_from = $default_until = date('Y-m-d');
+
+  if (!empty($_GET['from']['date'])) {
+    $default_from = $_GET['from']['date'];
+  }
+  if (!empty($_GET['from']['date'])) {
+    $default_until = $_GET['until']['date'];
+  }
+
+  $form['from'] = array(
+    '#type' => 'datepicker',
+    '#date_format' => 'Y-m-d',
+    '#title' => t('From'),
+    '#default_value' => $default_from,
+    '#required' => TRUE,
+    '#pre_render' => array('mate_user_content_limit_year_in_date'),
+  );
+
+
+  $form['until'] = array(
+    '#type' => 'datepicker',
+    '#date_format' => 'Y-m-d',
+    '#title' => t('Until'),
+    '#default_value' => $default_until,
+    '#required' => TRUE,
+    '#pre_render' => array('mate_user_content_limit_year_in_date'),
+  );
+
+
+  // Add roles field if page is total of content by user.
+  if ('admin' === arg(0) && 'content' === arg(1) && 'users' === arg(2)) {
+    $roles = mate_user_content_allowed_roles();
+
+    $form['roles'] = array(
+      '#type' => 'checkboxes',
+      '#options' => $roles,
+      '#title' => t('Roles'),
+      '#default_value' => (!empty($_GET['roles'])) ? array_keys($_GET['roles']) : array_keys($roles),
+    );
+  }
+
+  $form['submit_button'] = array(
+    '#type' => 'submit',
+    '#value' => t('Search'),
+  );
+
+  $form['#method'] = 'get';
+
+  return $form;
+}
+
+/**
+ * Restricts Year range in date form widget.
+ * @param $element
+ * @return mixed
+ */
+function mate_user_content_limit_year_in_date($element) {
+  $element['year']['#options'] = drupal_map_assoc(
+    range(
+      date('Y', strtotime('-2 Year')),
+      date('Y')
+    )
+  );
+  return $element;
+}
+
+function mate_user_content_from_until_form_submit($form, &$form_state) {
+  $form_state['redirect'] = FALSE;
+}
+
+/**
+ * Returns unix time from provided date or current unix time if $date is not valid. $date should have the following format
+ * array(
+ *      'date'    => 'YYYY-MM-DD HH:MM:SS',
+ * )
+ * @param $date
+ * @return int
+ */
+function mate_user_content_get_unixtime_from_date($date = NULL) {
+  if (NULL !== $date) {
+    return strtotime($date);
+  }
+  return time();
+}
+
+/**
+ * Returns all roles different from Anonymous, Authenticated nor Administrator
+ * @return array
+ */
+function mate_user_content_allowed_roles() {
+  $query = db_select('role', 'r');
+  $query->fields('r', array('rid', 'name'));
+  $query->orderBy('name');
+
+  $result = $query->execute();
+
+  $roles = array();
+  foreach ($result as $role) {
+    switch ($role->rid) {
+      case DRUPAL_ANONYMOUS_RID:
+      case DRUPAL_AUTHENTICATED_RID:
+        continue;
+        break;
+      default:
+        $roles[$role->rid] = t($role->name);
+    }
+  }
+
+  return $roles;
+}
