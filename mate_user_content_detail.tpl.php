@@ -1,3 +1,6 @@
+<?php
+drupal_add_css(drupal_get_path('module', 'mate_user_content') . '/css/styles.css');
+?>
 <div class="content">
   <h1><?php
      echo t('Content published by :user between :from AND :until', array(

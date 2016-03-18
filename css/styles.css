@@ -1,0 +1,17 @@
+form#mate-user-content-from-until-form {
+max-width: 690px;
+}
+form#mate-user-content-from-until-form ,
+form#mate-user-content-from-until-form .form-item-roles,
+body.page-admin-content-users div#google-chart {
+float: left;
+}
+
+form#mate-user-content-from-until-form .container-inline-date {
+float: left;
+clear: none;
+}
+
+form#mate-user-content-from-until-form .form-item-roles {
+min-width: 120px;
+}

@@ -1,4 +1,5 @@
 <?php
+drupal_add_css(drupal_get_path('module', 'mate_user_content') . '/css/styles.css');
 drupal_add_js('https://www.gstatic.com/charts/loader.js');
 ?>
 <script type="text/javascript">
