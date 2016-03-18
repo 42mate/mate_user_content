@@ -1,5 +1,6 @@
 name = 42mate - Display User contents
 description = List all content created by an user
 core = 7.x
+version = "7.x-1.0"
 package = 42mate
 dependencies[] = elements
